@@ -5,6 +5,7 @@ import pandas as pd
 import seaborn as sns
 from torchvision import transforms
 from tqdm import tqdm
+import copy
 
 import dataset
 
@@ -184,6 +185,7 @@ def rectangular(all_x, all_w, img):
 def show_mask_image(col):
     name, mask = name_and_mask(col)
     img = cv2.imread(str('C:\\Users\\K-132-14\\Downloads\\severstal-steel-defect-detection\\train_images\\' + name))
+    image = copy.deepcopy(img)
     palet = [(249, 192, 12), (0, 185, 241), (114, 0, 218), (249, 50, 12)]
     all_x, all_w = [], []
 
@@ -227,11 +229,14 @@ def show_mask_image(col):
     if not not all_x:
         crop_mas = rectangular(all_x, all_w, img)
         for i in range(len(crop_mas) - 1):
-            images.append(img[0:265, crop_mas[i]:crop_mas[i + 1]])
+            images.append(image[0:265, crop_mas[i]:crop_mas[i + 1]])
     else:
-        images = img
-    plt.imshow(img)
-    plt.show()
+        images = image
+    # plt.imshow(img)
+    # plt.show()
+    for im in images:
+        plt.imshow(im)
+        plt.show()
     return images
 
 
