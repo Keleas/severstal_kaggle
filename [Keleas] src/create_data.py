@@ -31,7 +31,8 @@ from albumentations import (
     OneOf,
     CLAHE,
     RandomBrightnessContrast,
-    RandomGamma
+    RandomGamma,
+    Normalize
 )
 from albumentations.torch import ToTensor
 from sklearn.model_selection import KFold
@@ -41,13 +42,6 @@ from src.transform import *
 
 import warnings
 warnings.filterwarnings("ignore")
-
-
-train_aug = Compose([
-    # PadIfNeeded(min_height=256, min_width=1600, p=1),
-    # VerticalFlip(p=0.2),
-    # HorizontalFlip(p=0.2),
-    ToTensor()])
 
 
 class SteelDatabase(Dataset):
@@ -74,9 +68,18 @@ class SteelDatabase(Dataset):
             image_path = os.path.join(self.root + 'train_images', image_id)
             image = cv2.imread(image_path)
 
+            mean = (0.485, 0.456, 0.406)
+            std = (0.229, 0.224, 0.225)
+            train_aug = Compose([
+                # PadIfNeeded(min_height=256, min_width=1600, p=1),
+                VerticalFlip(p=0.5),
+                HorizontalFlip(p=0.5),
+                Normalize(mean=mean, std=std, p=1),
+                ToTensor()])
+
             augmented = train_aug(image=image, mask=mask)
-            image = augmented['image'] / 255
-            mask = augmented['mask'] / 255
+            image = augmented['image']
+            mask = augmented['mask']
             mask = mask[0].permute(2, 0, 1)
 
             return image, mask, target
@@ -87,10 +90,16 @@ class SteelDatabase(Dataset):
             image_path = os.path.join(self.root + 'train_images', image_id)
             image = cv2.imread(image_path)
 
-            image = np.resize(image, (3, 256, 1600)) / 255
-            mask = np.resize(mask, (4, 256, 1600)) / 255
-            mask = torch.from_numpy(mask).float()
-            image = torch.from_numpy(image).float()
+            mean = (0.485, 0.456, 0.406)
+            std = (0.229, 0.224, 0.225)
+            test_aug = Compose([
+                Normalize(mean=mean, std=std, p=1),
+                ToTensor()])
+
+            augmented = test_aug(image=image, mask=mask)
+            image = augmented['image']
+            mask = augmented['mask']
+            mask = mask[0].permute(2, 0, 1)
 
             return image, mask, target
 
@@ -99,8 +108,20 @@ class SteelDatabase(Dataset):
             image_path = os.path.join(self.root, "test_images", image_id)
             image = cv2.imread(image_path)
 
-            image = np.resize(image, (3, 256, 1600)) / 255
-            image = torch.from_numpy(image).float()
+            mean = (0.485, 0.456, 0.406)
+            std = (0.229, 0.224, 0.225)
+            if self.is_tta:
+                test_aug = Compose([
+                    Normalize(mean=mean, std=std, p=1),
+                    HorizontalFlip(p=0.5),
+                    ToTensor()])
+            else:
+                test_aug = Compose([
+                    Normalize(mean=mean, std=std, p=1),
+                    ToTensor()])
+
+            augmented = test_aug(image=image)
+            image = augmented['image']
 
             return image
 
@@ -160,21 +181,12 @@ if __name__ == '__main__':
     from src.losses import lovasz_softmax
     from src.utils import do_kaggle_metric
     loss = lovasz_softmax(out_f.squeeze(1), target.squeeze(1))
-    precision, _, _ = do_kaggle_metric(F.sigmoid(mask).cpu().numpy(), mask.cpu().numpy(), 0.5)
+    precision, _, _ = do_kaggle_metric(mask.cpu().numpy(), mask.cpu().numpy(), 0.5)
     precision = precision.mean()
-    print(loss)
-    print(num_train)
+    print(f'lovasz: {loss}, kaggle_metric: {precision}')
     print(out_f.cpu().numpy().shape, mask.cpu().numpy().shape)
-    print(precision)
 
     print(F.sigmoid(mask).cpu().numpy().shape, F.softmax(mask, dim=1).cpu().numpy().shape)
-
-    from src.utils import do_kaggle_metric, Meter
-    meter = Meter()
-    meter.update(F.sigmoid(mask).detach().cpu(), mask.detach().cpu())
-    dices, iou = meter.get_metrics()
-    dice, dice_neg, dice_pos = dices
-    print(f"IoU: {iou:.4f} | dice: {dice:.4f} | dice_neg: {dice_neg:.4f} | dice_pos: {dice_pos:.4f}")
 
 
 

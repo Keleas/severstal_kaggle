@@ -18,8 +18,8 @@ import segmentation_models_pytorch as smp
 from src.logger import Logger
 from src.create_data import getDatabase
 from src.torchutils import EarlyStopping, AdamW, CyclicLRWithRestarts
-from src.losses import lovasz_softmax, jaccard_loss, dice_loss
-from src.utils import do_kaggle_metric, Meter
+from src.losses import lovasz_softmax, jaccard_loss, dice_loss, dice_channel_torch
+from src.utils import do_kaggle_metric
 
 
 class TrainModel(object):
@@ -39,7 +39,6 @@ class TrainModel(object):
 
     def val_step(self):
         """ Validation step """
-        meter = Meter()
         cum_loss = 0
         # predicts = [np.zeros((args.batch_size, 4, 256, 1600))] * len(self.val_loader)
         # truths = [np.zeros((args.batch_size, 4, 256, 1600))] * len(self.val_loader)
@@ -47,7 +46,6 @@ class TrainModel(object):
         truths = []
 
         self.model.eval()
-        i = 0
         for inputs, masks, target in tqdm(self.val_loader, ascii=True, desc='validation'):
             inputs, masks, target = inputs.to(device), masks.to(device), target.to(device)
             with torch.set_grad_enabled(False):
@@ -57,11 +55,10 @@ class TrainModel(object):
                 # loss = lovasz_softmax(F.softmax(out, dim=1).squeeze(1), target.squeeze(1))  # tune
                 # loss = loss1 + loss2
 
-            predicts.append(out.detach().cpu().numpy())
+            predicts.append(F.sigmoid(out).detach().cpu().numpy())
             truths.append(masks.detach().cpu().numpy())
 
             cum_loss += loss.item() * inputs.size(0)
-            meter.update(masks.detach().cpu(), out.detach().cpu())
             gc.collect()
 
         start = time.time()
@@ -69,9 +66,10 @@ class TrainModel(object):
         truths = np.concatenate(truths).squeeze()
         precision, _, _ = do_kaggle_metric(predicts, truths, 0.5)
         precision = precision.mean()
+        mean_dice = dice_channel_torch(predicts, truths, 0.5)
         val_loss = cum_loss / self.val_data.__len__()
         print(f"Val calculated: {(time.time() - start):.3f}s")
-        return val_loss, precision, meter
+        return val_loss, precision, mean_dice
 
     def train_step(self):
         """ Training step """
@@ -96,24 +94,17 @@ class TrainModel(object):
         epoch_loss = cum_loss / self.train_data.__len__()
         return epoch_loss
 
-    def logger_step(self, cur_epoch, losses_train, losses_val, accuracy, meter):
+    def logger_step(self, cur_epoch, losses_train, losses_val, accuracy, dice):
         """ Log information """
         print(f"[Epoch {cur_epoch}] training loss: {losses_train[-1]:.6f} | val_loss: {losses_val[-1]:.6f} | "
-              f"val_acc: {accuracy:.6f}")
+              f"val_acc: {accuracy:.6f}, dice: {dice:.6f}")
         print(f"Learning rate: {self.lr_scheduler.get_lr()[0]:.6f}")
-
-        dices, iou = meter.get_metrics()
-        dice, dice_neg, dice_pos = dices
-        print(f"IoU: {iou:.4f} | dice: {dice:.4f} | dice_neg: {dice_neg:.4f} | dice_pos: {dice_pos:.4f}")
 
         # 1. Log scalar values (scalar summary)
         info = {'loss': losses_train[-1],
                 'val_loss': losses_val[-1],
                 'val_acc': accuracy.item(),
-                'IoU': iou,
-                'dice': dice,
-                'dice_neg': dice_neg,
-                'dice_pos': dice_pos}
+                'dice': dice}
 
         for tag, value in info.items():
             self.logger.scalar_summary(tag, value, cur_epoch + 1)
@@ -192,13 +183,13 @@ class TrainModel(object):
             for epoch in range(args.epoch):
                 train_loss = self.train_step()
                 # train_loss = 1
-                val_loss, accuracy, meter = self.val_step()
+                val_loss, accuracy, dice = self.val_step()
                 self.lr_scheduler.step()
 
                 losses_train.append(train_loss)
                 losses_val.append(val_loss)
 
-                self.logger_step(epoch, losses_train, losses_val, accuracy, meter)
+                self.logger_step(epoch, losses_train, losses_val, accuracy, dice)
 
                 # scheduler checkpoint
                 if accuracy >= best_acc:
@@ -236,8 +227,8 @@ parser.add_argument('--fine_size', default=96, type=int, help='Resized image siz
 parser.add_argument('--pad_left', default=0, type=int, help='Left padding size')
 parser.add_argument('--pad_right', default=0, type=int, help='Right padding size')
 parser.add_argument('--batch_size', default=6, type=int, help='Batch size for training')
-parser.add_argument('--epoch', default=20, type=int, help='Number of training epochs')
-parser.add_argument('--snapshot', default=1, type=int, help='Number of snapshots per fold')
+parser.add_argument('--epoch', default=100, type=int, help='Number of training epochs')
+parser.add_argument('--snapshot', default=20, type=int, help='Number of snapshots per fold')
 parser.add_argument('--cuda', default=True, type=bool, help='Use cuda to train model')
 parser.add_argument('--save_weight', default='output/weights/', type=str, help='weight save space')
 parser.add_argument('--max_lr', default=0.01, type=float, help='max learning rate')
