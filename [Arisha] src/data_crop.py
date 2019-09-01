@@ -72,19 +72,83 @@ def first_step_images(mode):
             image = cv2.imread(file_path)
             files.append(file)
             if (dict_keys[file]['label'] == [0,0,0,0]).all():
+                dict_keys[file]['label'] = []
+                dict_keys[file]['segment'] = []
                 for i in range(7):
-                    if (image[i*200:(i+1)*200] != np.zeros((256, 1600, 3))).any():
+                    if (image[i*200:(i+1)*200] != np.zeros((256, 200, 3))).any():
                         images.append(image[0:265, i*200:(i+1)*200])
-                        dict_keys[file]['label'] = []
-                        dict_keys[file]['segment'] = []
                         dict_keys[file]['label'].append([0,0,0,0])
                         dict_keys[file]['segment'].append(preprocessing.rleToMask([[0], [0], [0], [0]]).reshape((4, 256, 1600)))
             else:
                 mask = preprocessing.rleToMask(dict_keys[file]['segment']).reshape((4, 256, 1600))
-                dict_keys, images = crop_with_defects(image, mask, dict_keys)
+                dict_keys, images = crop_with_defects(file, image, mask, dict_keys)
 
-    # files, images = np.array(files), np.array(images)
     return dict_keys, files, images
+
+
+def crop_with_defects(file, img, mask, dict_keys):
+    mask = (mask).astype('uint8')
+    image = copy.deepcopy(img)
+    all_x, all_w = [], []
+    masks, all_type_contours = [], []
+    for ch in range(4):
+        contours, _ = cv2.findContours(mask[ch, :, :], cv2.RETR_LIST, cv2.CHAIN_APPROX_NONE)
+        all_type_contours.append(contours)
+    contours = list(itertools.chain.from_iterable(all_type_contours))
+
+    LENGTH = len(contours)
+    status = np.zeros((LENGTH, 1))
+    for i, cnt1 in enumerate(contours):
+        x = i
+        if i != LENGTH - 1:
+            for j, cnt2 in enumerate(contours[i + 1:]):
+                x = x + 1
+                dist = find_if_close(cnt1, cnt2)
+                if dist == True:
+                    val = min(status[i], status[x])
+                    status[x] = status[i] = val
+                else:
+                    if status[x] == status[i]:
+                        status[x] = i + 1
+    unified = []
+    maximum = int(max(status)) + 1
+    for i in range(maximum):
+        pos = np.where(status == i)[0]
+        if pos.size != 0:
+            cont = np.vstack(contours[i] for i in pos)
+            hull = cv2.convexHull(cont)
+            unified.append(hull)
+    for c in unified:
+        (x, y, w, h) = cv2.boundingRect(c)
+        cv2.rectangle(img, (x, y), (x + w, y + h), (255, 0, 0), 2)
+        all_x.append(x)
+        all_w.append(x + w)
+
+    all_x = np.array(all_x)
+    all_w = np.array(all_w)
+    limits = []
+    for i in range(0, 1600, 200):
+        limits.append(i)
+
+    for i in range(len(limits)):
+        for j in range(len(all_x)):
+            if limits[i] > all_x[j] and limits[i] < all_w[j]:
+                limits[i] = all_w[j]
+
+    images = []
+    dict_keys[file]['label'] = []
+    dict_keys[file]['segment'] = []
+    for i in range(len(limits) - 1):
+        if (image[0:265, limits[i]:limits[i + 1]] != np.zeros((256, limits[i+1] - limits[i], 3))).any():
+            images.append(image[0:265, limits[i]:limits[i + 1]])
+            dict_keys[file]['label'].append([0, 0, 0, 0])
+            dict_keys[file]['segment'].append(preprocessing.rleToMask([[0], [0], [0], [0]]).reshape((4, 256, 1600)))
+            for ch in range(4):
+                crop_mask = mask[ch, 0:265, limits[i]:limits[i + 1]]
+                dict_keys[file]['label'][-1][ch] = ch 
+                dict_keys[file]['segment'][-1][ch] = crop_mask 
+
+    return dict_keys, images
 
 
 def first_step_labels(mode):
@@ -269,23 +333,17 @@ def check_if_less(new_x, new_w, new_all_x, new_all_w):
 
 
 def rectangular(all_x, all_w, img, masks):
-    all_x.sort()
-    all_w.sort()
     crop_mas = []
-    new_mask = []
     for j in range(len(all_x)):
         if all_w[j] - all_x[j] < 100:
             check_if_less(all_x[j], all_w[j], crop_mas, crop_mas)
         else:
             crop_mas.append(all_x[j])
             crop_mas.append(all_w[j])
-        new_mask.append(masks[j])
     if crop_mas[-1] < 1400:
         for j in range(crop_mas[-1], 1600, 200):
             if abs(min(crop_mas, key=lambda a: abs(a - j)) - j) > 100:
                 crop_mas.append(j)
-                new_mask.append(0)
-
     if crop_mas[0] > 400:
         for j in range(0, crop_mas[0], 200):
             if abs(min(crop_mas, key=lambda a: abs(a - j)) - j) > 100:
@@ -295,7 +353,6 @@ def rectangular(all_x, all_w, img, masks):
 
     crop_mas.append(0)
     crop_mas.append(1600)
-    new_mask.append(0)
     crop_mas.sort()
     crop_mas = np.array(crop_mas)
     diff = np.diff(crop_mas)
@@ -304,102 +361,11 @@ def rectangular(all_x, all_w, img, masks):
         if diff[i] >= 100:
             new_crop_mas.append(crop_mas[i])
 
-
     for i in range(len(new_crop_mas)-1):
         cv2.rectangle(img, (int(new_crop_mas[i]), 0), (int(new_crop_mas[i]), 256), (0, 255, 0), 2)
     #     if new_mask[i] == 0:
     #         new_mask[i] = np.zeros((256, ))
-
-
     return new_crop_mas
-
-
-def crop_with_defects(img, mask, dict_keys):
-    mask = (mask).astype('uint8')
-    image = copy.deepcopy(img)
-    all_x, all_w = [], []
-    masks, all_type_contours = [], []
-    for ch in range(4):
-        contours, _ = cv2.findContours(mask[ch, :, :], cv2.RETR_LIST, cv2.CHAIN_APPROX_NONE)
-        all_type_contours.append(contours)
-        # for i in range(0, len(contours)):
-        #     cv2.polylines(img, contours[i], True, palet[ch], 2)
-    contours = list(itertools.chain.from_iterable(all_type_contours))
-
-    LENGTH = len(contours)
-    status = np.zeros((LENGTH, 1))
-    for i, cnt1 in enumerate(contours):
-        x = i
-        if i != LENGTH - 1:
-            for j, cnt2 in enumerate(contours[i + 1:]):
-                x = x + 1
-                dist = find_if_close(cnt1, cnt2)
-                if dist == True:
-                    val = min(status[i], status[x])
-                    status[x] = status[i] = val
-                else:
-                    if status[x] == status[i]:
-                        status[x] = i + 1
-    unified = []
-    maximum = int(max(status)) + 1
-    for i in range(maximum):
-        pos = np.where(status == i)[0]
-        if pos.size != 0:
-            cont = np.vstack(contours[i] for i in pos)
-            hull = cv2.convexHull(cont)
-            unified.append(hull)
-    for c in unified:
-        (x, y, w, h) = cv2.boundingRect(c)
-        cv2.rectangle(img, (x, y), (x + w, y + h), (255, 0, 0), 2)
-
-        all_x.append(x)
-        all_w.append(x + w)
-
-    all_x = np.array(all_x)
-    all_w = np.array(all_w)
-    all_rect_len = []
-    the_one_rect_len = 0
-    for i in range(len(all_x)):
-        all_rect_len.append(all_x[i] - the_one_rect_len)
-        the_one_rect_len += all_x[i]
-        all_rect_len.append(all_w[i] - the_one_rect_len)
-    for i in range(len(all_rect_len)):
-        if all_rect_len[i] < 200:
-            if i % 2 == 1:   # сегменты с дефектом
-                all_x[]
-
-
-
-    # if all_x[0] < 100:
-    #     all_x[0] = 0
-    # if all_w[-1] > 1500:
-    #     all_w[-1] = 1600
-    # for i in range(len(all_x)):
-    #     if rectangle_len[i] < 200:
-
-
-
-
-
-
-
-
-
-    images = []
-    if not not all_x:
-        crop_mas = rectangular(all_x, all_w, img, masks)
-        for i in range(len(crop_mas) - 1):
-            images.append(image[0:265, crop_mas[i]:crop_mas[i + 1]])
-    else:
-        for i in range(7):
-            images.append(image[0:265, 200*i:200*(i+1)])
-
-    plt.imshow(img)
-    plt.show()
-    # for im in images:
-    #     plt.imshow(im)
-    #     plt.show()
-    return images
 
 
 def all_classes():
@@ -433,6 +399,5 @@ def all_classes():
             idx_class_multi.append(col)
     return idx_no_defect, idx_class_1, idx_class_2, idx_class_3, \
            idx_class_4, idx_class_multi, idx_class_triple
-
 
 
