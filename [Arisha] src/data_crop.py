@@ -1,3 +1,7 @@
+import pandas as pd
+import os
+import re
+from collections import Counter
 import cv2
 import matplotlib.pyplot as plt
 import numpy as np
@@ -6,23 +10,145 @@ import seaborn as sns
 from torchvision import transforms
 from tqdm import tqdm
 import copy
+import torch
 
 import dataset
 
-batch_size = 4
+
+def labels(mode):
+    data_dict = {}
+    with open(os.path.join('G:\\SteelDetection', mode + '.csv')) as csv_file:
+        next(csv_file)
+        for num, line in enumerate(csv_file, 1):
+            if num > 20:
+                break
+            line_data = re.split(r'[_,\n]', line)
+            file_name = line_data[0]
+            if (num - 1) % 4 == 0:
+                data_dict[file_name] = {}
+                data_dict[file_name]['label'] = [0,0,0,0]
+                data_dict[file_name]['segment'] = [[0], [0], [0], [0]]
+            if not not line_data[2]:
+                data_dict[file_name]['label'][(num-1)%4] = int(line_data[1])
+                pixels = line_data[2].split()
+                data_dict[file_name]['segment'][(num-1)%4] = list(map(int,pixels))
+    return data_dict
 
 
-def rleToMask(segment):
-    rows, cols = 256, 1600
-    rleNumbers = np.array(segment)
-    rlePairs = rleNumbers.reshape(-1, 2)
-    img = np.zeros(rows * cols, dtype=np.uint8)
-    for index, length in rlePairs:
-        index -= 1
-        img[index:index + length] = 255
-    img = img.reshape(cols, rows)
-    img = img.T
-    return img
+def labels_distribution(): #({3.0: 5150, 1.0: 897, 4.0: 801, 2.0: 247})
+    list_labels = np.array([])
+    dict = labels('train')
+    for file in dict:
+        list_labels = np.append(list_labels, dict[file]['label'])
+    print(Counter(list_labels))
+
+
+def images_distribution():
+    height, weight, channels = [], [] , []
+    _, list_images = images('train')
+    for image in list_images:
+        image_height, image_weight, image_channels = image.shape
+        height.append(image_height)
+        weight.append(image_weight)
+        channels.append(image_channels)
+    print('Height:', Counter(height))
+    print('Weight:', Counter(weight))
+    print('Channels:', Counter(channels))
+    # Height: Counter({256: 12568})
+    # Width: Counter({1600: 12568})
+    # Channels: Counter({3: 12568})
+
+
+def one_augment(aug, image):
+    return aug(image=image)['image']
+
+
+def first_step_images(mode):
+    files, images = [], []
+    dict_keys = labels(mode).keys()
+    for file in  os.listdir('G:\\SteelDetection\\' + mode + '_images'):
+        if file in dict_keys:
+            file_path = os.path.join(('G:\\SteelDetection\\' + mode + '_images'), file)
+            image = cv2.imread(file_path)
+            files.append(file)
+            if (dict_keys[file]['label'] == [0,0,0,0]).all():
+                for i in range(7):
+                    if (image[i*200:(i+1)*200] != np.zeros((256, 1600, 3))).any():
+                        images.append(image[0:265, i*200:(i+1)*200])
+                        dict_keys[file]['label'] = []
+                        dict_keys[file]['segment'] = []
+                        dict_keys[file]['label'].append([0,0,0,0])
+                        dict_keys[file]['segment'].append(preprocessing.rleToMask([[0], [0], [0], [0]]).reshape((4, 256, 1600)))
+            else:
+                mask = preprocessing.rleToMask(dict_keys[file]['segment']).reshape((4, 256, 1600))
+                dict_keys, images = crop_with_defects(image, mask, dict_keys)
+
+    # files, images = np.array(files), np.array(images)
+    return dict_keys, files, images
+
+
+def first_step_labels(mode):
+    data_dict = {}
+    count = 0
+    with open(os.path.join('G:\\SteelDetection\\', mode + '.csv')) as csv_file:
+        next(csv_file)
+        for num, line in enumerate(csv_file, 1):
+            line_data = re.split(r'[_,\n]', line)
+            if not not line_data[2]:
+                file_name = line_data[0]
+                count += 1
+
+                data_dict[file_name] = {}
+                data_dict[file_name]['label']= int(line_data[1])
+                pixels = line_data[2].split()
+                data_dict[file_name]['segment'] = (list(map(int,pixels)))
+
+            if count > 800:
+                break
+    return data_dict
+
+def find_intersection(mode):
+    data_dict = {}
+
+    with open(os.path.join('G:\\SteelDetection', mode + '.csv')) as csv_file:
+        next(csv_file)
+        for num, line in tqdm(enumerate(csv_file, 1)):
+
+            line_data = re.split(r'[_,\n]', line)
+            file_name = line_data[0]
+            if (num - 1) % 4 == 0:
+                data_dict[file_name] = {}
+                data_dict[file_name]['label'] = []
+                data_dict[file_name]['segment'] = []
+            if not not line_data[2]:
+                data_dict[file_name]['label'].append(int(line_data[1]))
+                pixels = line_data[2].split()
+                data_dict[file_name]['segment'].append((list(map(int,pixels))))
+            if num % 4 == 0 and (not data_dict[file_name]['label']): #or len(data_dict[file_name]['label'])< 2):
+                data_dict.pop(file_name)
+            if num > 20:
+                break
+
+    return data_dict
+
+
+def rleToMask(segments):
+    images = np.zeros((4, 256, 1600))
+    for i, segment in enumerate(segments):
+        if segment != [0]:
+            rows, cols = 256, 1600
+            rleNumbers = np.array(segment)
+            rlePairs = rleNumbers.reshape(-1, 2)
+            img = np.zeros(rows * cols, dtype=np.uint8)
+            for index, length in rlePairs:
+                index -= 1
+                img[index:index + length] = 255
+            img = img.reshape(cols, rows)
+            img = img.T
+            images[i] = img
+
+    images = images.reshape((4, 256, 1600))
+    return images
 
 
 def paint_all_mask():
@@ -75,7 +201,7 @@ def more_segments():
             plt.imshow(segm_image, alpha=0.4 + i * 0.2)
             plt.axis('off')
 
-        plt.savefig('C:\\Users\\K-132-14\\Downloads\\severstal-steel-defect-detection\\pic\\' + file)
+        plt.savefig('G:\SteelDetection' + file)
         plt.close(fig)
 
 
@@ -93,10 +219,6 @@ def quantity():
     print(files)
     ax = sns.heatmap(quan, annot=True)
     plt.show()
-
-
-train_df = pd.read_csv("C:\\Users\\K-132-14\\Downloads\\severstal-steel-defect-detection\\train.csv")  # change here
-sample_df = pd.read_csv("C:\\Users\\K-132-14\\Downloads\\severstal-steel-defect-detection\\test.csv")
 
 
 def name_and_mask(start_idx):
@@ -125,7 +247,7 @@ def find_if_close(cnt1, cnt2):
     for i in range(row1):
         for j in range(row2):
             dist = np.linalg.norm(cnt1[i] - cnt2[j])
-            if abs(dist) < 200:  # <-- threshold
+            if abs(dist) < 200:
                 return True
             elif i == row1 - 1 and j == row2 - 1:
                 return False
@@ -146,28 +268,34 @@ def check_if_less(new_x, new_w, new_all_x, new_all_w):
     new_all_w.append(int(new_w))
 
 
-def rectangular(all_x, all_w, img):
+def rectangular(all_x, all_w, img, masks):
     all_x.sort()
     all_w.sort()
     crop_mas = []
+    new_mask = []
     for j in range(len(all_x)):
         if all_w[j] - all_x[j] < 100:
             check_if_less(all_x[j], all_w[j], crop_mas, crop_mas)
         else:
             crop_mas.append(all_x[j])
             crop_mas.append(all_w[j])
+        new_mask.append(masks[j])
     if crop_mas[-1] < 1400:
         for j in range(crop_mas[-1], 1600, 200):
             if abs(min(crop_mas, key=lambda a: abs(a - j)) - j) > 100:
                 crop_mas.append(j)
-    if crop_mas[0] > 400:
+                new_mask.append(0)
 
+    if crop_mas[0] > 400:
         for j in range(0, crop_mas[0], 200):
             if abs(min(crop_mas, key=lambda a: abs(a - j)) - j) > 100:
                 crop_mas.append(j)
+                new_mask.append(0)
+
 
     crop_mas.append(0)
     crop_mas.append(1600)
+    new_mask.append(0)
     crop_mas.sort()
     crop_mas = np.array(crop_mas)
     diff = np.diff(crop_mas)
@@ -176,67 +304,101 @@ def rectangular(all_x, all_w, img):
         if diff[i] >= 100:
             new_crop_mas.append(crop_mas[i])
 
-    for i in range(len(new_crop_mas)):
+
+    for i in range(len(new_crop_mas)-1):
         cv2.rectangle(img, (int(new_crop_mas[i]), 0), (int(new_crop_mas[i]), 256), (0, 255, 0), 2)
+    #     if new_mask[i] == 0:
+    #         new_mask[i] = np.zeros((256, ))
+
 
     return new_crop_mas
 
 
-def show_mask_image(col):
-    name, mask = name_and_mask(col)
-    img = cv2.imread(str('C:\\Users\\K-132-14\\Downloads\\severstal-steel-defect-detection\\train_images\\' + name))
+def crop_with_defects(img, mask, dict_keys):
+    mask = (mask).astype('uint8')
     image = copy.deepcopy(img)
-    palet = [(249, 192, 12), (0, 185, 241), (114, 0, 218), (249, 50, 12)]
     all_x, all_w = [], []
-
+    masks, all_type_contours = [], []
     for ch in range(4):
-        contours, _ = cv2.findContours(mask[:, :, ch], cv2.RETR_LIST, cv2.CHAIN_APPROX_NONE)
-        if len(contours) > 0:
-            for i in range(0, len(contours)):
-                cv2.polylines(img, contours[i], True, palet[ch], 2)
+        contours, _ = cv2.findContours(mask[ch, :, :], cv2.RETR_LIST, cv2.CHAIN_APPROX_NONE)
+        all_type_contours.append(contours)
+        # for i in range(0, len(contours)):
+        #     cv2.polylines(img, contours[i], True, palet[ch], 2)
+    contours = list(itertools.chain.from_iterable(all_type_contours))
 
-            LENGTH = len(contours)
-            status = np.zeros((LENGTH, 1))
+    LENGTH = len(contours)
+    status = np.zeros((LENGTH, 1))
+    for i, cnt1 in enumerate(contours):
+        x = i
+        if i != LENGTH - 1:
+            for j, cnt2 in enumerate(contours[i + 1:]):
+                x = x + 1
+                dist = find_if_close(cnt1, cnt2)
+                if dist == True:
+                    val = min(status[i], status[x])
+                    status[x] = status[i] = val
+                else:
+                    if status[x] == status[i]:
+                        status[x] = i + 1
+    unified = []
+    maximum = int(max(status)) + 1
+    for i in range(maximum):
+        pos = np.where(status == i)[0]
+        if pos.size != 0:
+            cont = np.vstack(contours[i] for i in pos)
+            hull = cv2.convexHull(cont)
+            unified.append(hull)
+    for c in unified:
+        (x, y, w, h) = cv2.boundingRect(c)
+        cv2.rectangle(img, (x, y), (x + w, y + h), (255, 0, 0), 2)
 
-            for i, cnt1 in enumerate(contours):
-                x = i
-                if i != LENGTH - 1:
-                    for j, cnt2 in enumerate(contours[i + 1:]):
-                        x = x + 1
-                        dist = find_if_close(cnt1, cnt2)
-                        if dist == True:
-                            val = min(status[i], status[x])
-                            status[x] = status[i] = val
-                        else:
-                            if status[x] == status[i]:
-                                status[x] = i + 1
-            unified = []
-            maximum = int(max(status)) + 1
-            for i in range(maximum):
-                pos = np.where(status == i)[0]
-                if pos.size != 0:
-                    cont = np.vstack(contours[i] for i in pos)
-                    hull = cv2.convexHull(cont)
-                    unified.append(hull)
+        all_x.append(x)
+        all_w.append(x + w)
 
-            for c in unified:
-                (x, y, w, h) = cv2.boundingRect(c)
-                cv2.rectangle(img, (x, y), (x + w, y + h), (255, 0, 0), 2)
+    all_x = np.array(all_x)
+    all_w = np.array(all_w)
+    all_rect_len = []
+    the_one_rect_len = 0
+    for i in range(len(all_x)):
+        all_rect_len.append(all_x[i] - the_one_rect_len)
+        the_one_rect_len += all_x[i]
+        all_rect_len.append(all_w[i] - the_one_rect_len)
+    for i in range(len(all_rect_len)):
+        if all_rect_len[i] < 200:
+            if i % 2 == 1:   # сегменты с дефектом
+                all_x[]
 
-                all_x.append(x)
-                all_w.append(x + w)
+
+
+    # if all_x[0] < 100:
+    #     all_x[0] = 0
+    # if all_w[-1] > 1500:
+    #     all_w[-1] = 1600
+    # for i in range(len(all_x)):
+    #     if rectangle_len[i] < 200:
+
+
+
+
+
+
+
+
+
     images = []
     if not not all_x:
-        crop_mas = rectangular(all_x, all_w, img)
+        crop_mas = rectangular(all_x, all_w, img, masks)
         for i in range(len(crop_mas) - 1):
             images.append(image[0:265, crop_mas[i]:crop_mas[i + 1]])
     else:
-        images = image
-    # plt.imshow(img)
-    # plt.show()
-    for im in images:
-        plt.imshow(im)
-        plt.show()
+        for i in range(7):
+            images.append(image[0:265, 200*i:200*(i+1)])
+
+    plt.imshow(img)
+    plt.show()
+    # for im in images:
+    #     plt.imshow(im)
+    #     plt.show()
     return images
 
 
@@ -273,9 +435,4 @@ def all_classes():
            idx_class_4, idx_class_multi, idx_class_triple
 
 
-if __name__ == '__main__':
-    no_def, class_1, class_2, class_3, class_4, multi, triple = all_classes()
-    classes = [class_1, class_2, class_3, class_4, multi, triple]
-    for new_class in classes:
-        for idx in tqdm(new_class):
-            show_mask_image(idx)
+
