@@ -45,7 +45,7 @@ warnings.filterwarnings("ignore")
 
 
 class SteelDatabase(Dataset):
-    def __init__(self, image_list, df, mode, is_tta=False, fine_size=(256, 1600, 3)):
+    def __init__(self, mode, image_list=None, df=None, is_tta=False, fine_size=(256, 1600, 3)):
         self.image_list = image_list
         self.df = df
         self.mode = mode
@@ -113,7 +113,7 @@ class SteelDatabase(Dataset):
             if self.is_tta:
                 test_aug = Compose([
                     Normalize(mean=mean, std=std, p=1),
-                    HorizontalFlip(p=0.5),
+                    HorizontalFlip(p=1),
                     ToTensor()])
             else:
                 test_aug = Compose([
@@ -123,7 +123,7 @@ class SteelDatabase(Dataset):
             augmented = test_aug(image=image)
             image = augmented['image']
 
-            return image
+            return image_id, image
 
 
 def getDatabase(mode, image_idx):

@@ -9,17 +9,18 @@ import matplotlib.pyplot as plt
 
 import torch
 from torch import nn
-from torch.utils.data import DataLoader
-from torch.utils.data.sampler import RandomSampler
-from sklearn.model_selection import KFold
 import torch.nn.functional as F
+from torch.utils.data import DataLoader
 import segmentation_models_pytorch as smp
+from sklearn.model_selection import KFold
+from torch.utils.data.sampler import RandomSampler
+from sklearn.model_selection import train_test_split
 
 from src.logger import Logger
+from src.utils import do_kaggle_metric
 from src.create_data import getDatabase
 from src.torchutils import EarlyStopping, AdamW, CyclicLRWithRestarts
 from src.losses import lovasz_softmax, jaccard_loss, dice_loss, dice_channel_torch
-from src.utils import do_kaggle_metric
 
 
 class TrainModel(object):
@@ -46,7 +47,7 @@ class TrainModel(object):
         truths = []
 
         self.model.eval()
-        for inputs, masks, target in tqdm(self.val_loader, ascii=True, desc='validation'):
+        for inputs, masks, target in tqdm(self.val_loader, total=len(self.val_loader), ascii=True, desc='validation'):
             inputs, masks, target = inputs.to(device), masks.to(device), target.to(device)
             with torch.set_grad_enabled(False):
                 out = self.model(inputs)
@@ -75,7 +76,7 @@ class TrainModel(object):
         """ Training step """
         cum_loss = 0
         self.model.train()
-        for inputs, masks, target in tqdm(self.train_loader, ascii=True, desc='train'):
+        for inputs, masks, target in tqdm(self.train_loader, total=len(self.train_loader), ascii=True, desc='train'):
             inputs, masks, target = inputs.to(device), masks.to(device), target.to(device)
             self.optimizer.zero_grad()
 
@@ -133,24 +134,30 @@ class TrainModel(object):
     def main(self):
         """ Main training loop """
         # Get Model
-        self.model = smp.Unet(args.model, classes=4, encoder_weights=None)
+        self.model = smp.Unet(args.model, classes=4, encoder_weights='imagenet')
         self.model = torch.nn.Sequential(*(list(self.model.children())[:-1]))
         self.model.to(device)
         scheduler_step = args.epoch // args.snapshot
 
         num_train = len(os.listdir('input/severstal-steel-defect-detection/train_images'))
-        # num_train = 5000
+        # num_train = 1000
         indices = list(range(num_train))
 
-        num_fold = 10
-        kf = KFold(n_splits=num_fold, random_state=42, shuffle=True)
-        train_idx = []
-        valid_idx = []
-        for t, v in kf.split(indices):
-            train_idx.append(t)
-            valid_idx.append(v)
+        args.num_fold = 10
+        if args.num_fold > 1:
+            kf = KFold(n_splits=args.num_fold, random_state=42, shuffle=True)
+            train_idx = []
+            valid_idx = []
+            for t, v in kf.split(indices):
+                train_idx.append(t)
+                valid_idx.append(v)
+        elif args.num_fold == 1:
+            train_idx, valid_idx, _, _ = train_test_split(indices, indices, test_size=0.2, random_state=42)
+            train_idx, valid_idx = [train_idx], [valid_idx]
+        else:
+            raise Exception('Invalid number of args.num_fold')
 
-        for fold in range(num_fold):
+        for fold in range(args.num_fold):
             print(f'************************'
                   f'**** [FOLD: {fold}] ****'
                   f'************************')
@@ -198,7 +205,7 @@ class TrainModel(object):
 
                 if (epoch + 1) % scheduler_step == 0:
                     torch.save(best_param, args.save_weight + args.weight_name +
-                               'f' + str(fold) + '_' + str(num_snapshot) + '.pth')
+                               '_f' + str(fold) + '_s' + str(num_snapshot) + '.pth')
 
                     self.optimizer = torch.optim.SGD(self.model.parameters(),
                                                      lr=args.max_lr,
@@ -222,12 +229,11 @@ class TrainModel(object):
 
 
 parser = argparse.ArgumentParser(description='')
-parser.add_argument('--model', default='resnet18', type=str, help='Model version')
+parser.add_argument('--model', default='resnet34', type=str, help='Model version')
 parser.add_argument('--fine_size', default=96, type=int, help='Resized image size')
-parser.add_argument('--pad_left', default=0, type=int, help='Left padding size')
-parser.add_argument('--pad_right', default=0, type=int, help='Right padding size')
-parser.add_argument('--batch_size', default=6, type=int, help='Batch size for training')
+parser.add_argument('--batch_size', default=4, type=int, help='Batch size for training')
 parser.add_argument('--epoch', default=100, type=int, help='Number of training epochs')
+parser.add_argument('--num_fold', default=1, type=int, help='Number of folds')
 parser.add_argument('--snapshot', default=20, type=int, help='Number of snapshots per fold')
 parser.add_argument('--cuda', default=True, type=bool, help='Use cuda to train model')
 parser.add_argument('--save_weight', default='output/weights/', type=str, help='weight save space')
@@ -238,7 +244,7 @@ parser.add_argument('--weight_decay', default=1e-4, type=float, help='Weight dec
 parser.add_argument('--patience', default=40, type=int, help='Number of epoch waiting for best score')
 
 args = parser.parse_args()
-fine_size = args.fine_size + args.pad_left + args.pad_right
+fine_size = args.fine_size
 args.weight_name = 'model_' + str(fine_size) + '_' + args.model
 
 if not os.path.isdir(args.save_weight):

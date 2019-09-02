@@ -333,7 +333,7 @@ def jaccard_loss(true, logits, eps=1e-7):
     cardinality = torch.sum(probas + true_1_hot, dims)
     union = cardinality - intersection
     jacc_loss = (intersection / (union + eps)).mean()
-    return (1 - jacc_loss)
+    return 1 - jacc_loss
 
 
 def dice_channel_torch(probability, truth, threshold):
@@ -343,13 +343,13 @@ def dice_channel_torch(probability, truth, threshold):
     with torch.no_grad():
         for i in range(batch_size):
             for j in range(channel_num):
-                channel_dice = dice_single_channel(probability[i, j,:,:], truth[i, j, :, :], threshold)
+                channel_dice = dice_single_channel(probability[i, j, :, :], truth[i, j, :, :], threshold)
                 mean_dice_channel += channel_dice/(batch_size * channel_num)
     return mean_dice_channel
 
 
-def dice_single_channel(probability, truth, threshold, eps = 1E-9):
-    p = (probability.view(-1) > threshold).float()
-    t = (truth.view(-1) > 0.5).float()
-    dice = (2.0 * (p * t).sum() + eps)/ (p.sum() + t.sum() + eps)
+def dice_single_channel(probability, truth, threshold, eps=1E-9):
+    t = (truth.flatten() > 0.5)
+    p = (probability.flatten() > threshold)
+    dice = (2.0 * (p * t).sum() + eps) / (p.sum() + t.sum() + eps)
     return dice
