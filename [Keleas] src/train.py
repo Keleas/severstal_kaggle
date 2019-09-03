@@ -229,9 +229,9 @@ class TrainModel(object):
 
 
 parser = argparse.ArgumentParser(description='')
-parser.add_argument('--model', default='resnet34', type=str, help='Model version')
+parser.add_argument('--model', default='resnet18', type=str, help='Model version')
 parser.add_argument('--fine_size', default=96, type=int, help='Resized image size')
-parser.add_argument('--batch_size', default=4, type=int, help='Batch size for training')
+parser.add_argument('--batch_size', default=16, type=int, help='Batch size for training')
 parser.add_argument('--epoch', default=100, type=int, help='Number of training epochs')
 parser.add_argument('--num_fold', default=1, type=int, help='Number of folds')
 parser.add_argument('--snapshot', default=20, type=int, help='Number of snapshots per fold')
