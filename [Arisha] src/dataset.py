@@ -11,7 +11,7 @@ from matplotlib import pyplot as plt
 import albumentations as albu
 
 import preprocessing
-CROP_LEN = 800
+CROP_LEN = 1600
 
 class SteelDataset(Dataset):
 
@@ -45,9 +45,10 @@ class SteelDataset(Dataset):
 
         # image = preprocessing.one_augment(aug, image)
 
-        # segment = np.transpose(segment, (1, 2, 0))
+        segment = np.transpose(segment, (1, 2, 0))
         image = ToTensor()(image).float()
-        # segment = ToTensor()(segment).float()
+
+        segment = ToTensor()(segment).float()
 
         # mask = ToTensor()(mask).float()
         return (image, segment)
