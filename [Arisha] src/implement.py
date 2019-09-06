@@ -17,11 +17,9 @@ from matplotlib import pyplot as plt
 batch_size = 4
 
 if __name__ == '__main__':
-
     data_set = dataset.SteelDataset(mode='train')
-
     test_set = dataset.SteelDataset(mode='test')
-    validation_split = .2
+    validation_split = .1
     shuffle_dataset = True
     random_seed = 42
     dataset_size = len(data_set)
@@ -35,12 +33,12 @@ if __name__ == '__main__':
     train_sampler = SubsetRandomSampler(train_indices)
     valid_sampler = SubsetRandomSampler(val_indices)
 
-    train_loader = torch.utils.data.DataLoader(data_set, batch_size=batch_size)
-    val_loader = torch.utils.data.DataLoader(data_set, batch_size=batch_size)
-    test_loader = torch.utils.data.DataLoader(test_set, batch_size=batch_size,
-                                              shuffle=False)
+    train_loader = torch.utils.data.DataLoader(data_set, sampler=train_sampler, batch_size=batch_size)
+    val_loader = torch.utils.data.DataLoader(data_set, sampler=valid_sampler, batch_size=batch_size)
+    test_loader = torch.utils.data.DataLoader(test_set, batch_size=batch_size, shuffle=False)
 
     model = smp.Unet('resnet18', encoder_weights='imagenet', classes=4)
+    # model = nn.Sequential(*(list(model.children())[:-1]))
     model = model.to('cuda:0')
     # criterion = nn.BCEWithLogitsLoss()
     train_accuracy, val_predicted, val_labels, test_predicted, test_labels = \
