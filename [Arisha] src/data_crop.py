@@ -10,6 +10,7 @@ patience_valid = 20
 channel_num = 4
 loss_to_save = 1
 
+
 def do_kaggle_metric(predict,truth, threshold=0.5):
 
     N = len(predict)

@@ -20,7 +20,6 @@ class SteelDataset(Dataset):
         self.crop_im, self.images, self.files_names = preprocessing.images(mode)
         self.labels_dict, self.crop_mask = preprocessing.labels(mode)
 
-
     def __len__(self):
         return len(self.images)
 
@@ -28,8 +27,9 @@ class SteelDataset(Dataset):
         aug = albu.Compose([
             albu.Flip(p=0.3),
             albu.Rotate(p=0.9),
-            albu.Blur(p=0.4)
-        ], p=0.9)
+            albu.Blur(p=0.4),
+            albu.ToFloat(p=1.)
+        ])
         # image = self.crop_im[idx]
         # segment = self.crop_mask[idx]
         image = self.images[idx]
