@@ -34,7 +34,7 @@ from albumentations import (
     RandomGamma,
     Normalize
 )
-from albumentations.torch import ToTensor
+from albumentations.pytorch.transforms import ToTensor
 from sklearn.model_selection import KFold
 
 from src.utils import rle_decode, rle_encode
@@ -71,7 +71,6 @@ class SteelDatabase(Dataset):
             mean = (0.485, 0.456, 0.406)
             std = (0.229, 0.224, 0.225)
             train_aug = Compose([
-                # PadIfNeeded(min_height=256, min_width=1600, p=1),
                 VerticalFlip(p=0.5),
                 HorizontalFlip(p=0.5),
                 Normalize(mean=mean, std=std, p=1),
