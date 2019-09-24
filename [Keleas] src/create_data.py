@@ -16,14 +16,14 @@ from torch.utils.data import DataLoader
 from torch.utils.data.sampler import RandomSampler
 from sklearn.model_selection import train_test_split
 from albumentations import (
-    PadIfNeeded,
+    MotionBlur,
     HorizontalFlip,
     VerticalFlip,
-    CenterCrop,
-    Crop,
+    MedianBlur,
+    Blur,
     Compose,
-    Transpose,
-    RandomRotate90,
+    IAAAdditiveGaussianNoise,
+    GaussNoise,
     ElasticTransform,
     GridDistortion,
     OpticalDistortion,
@@ -71,15 +71,29 @@ class SteelDatabase(Dataset):
             mean = (0.485, 0.456, 0.406)
             std = (0.229, 0.224, 0.225)
             train_aug = Compose([
-                VerticalFlip(p=0.5),
-                HorizontalFlip(p=0.5),
+                OneOf([
+                    VerticalFlip(),
+                    HorizontalFlip(),
+                ], p=0.5),
+                OneOf([
+                    MotionBlur(p=0.2),
+                    MedianBlur(blur_limit=3, p=0.1),
+                    Blur(blur_limit=3, p=0.1),
+                ], p=0.2),
+                OneOf([
+                    IAAAdditiveGaussianNoise(),
+                    GaussNoise(),
+                ], p=0.2),
                 Normalize(mean=mean, std=std, p=1),
                 ToTensor()])
 
-            augmented = train_aug(image=image, mask=mask)
+            data = {"image": image, "mask": mask, "target": target}
+            augmented = train_aug(**data)
             image = augmented['image']
             mask = augmented['mask']
             mask = mask[0].permute(2, 0, 1)
+
+            target = augmented['target']
 
             return image, mask, target
 
@@ -95,10 +109,13 @@ class SteelDatabase(Dataset):
                 Normalize(mean=mean, std=std, p=1),
                 ToTensor()])
 
-            augmented = test_aug(image=image, mask=mask)
+            data = {"image": image, "mask": mask, "target": target}
+            augmented = test_aug(**data)
             image = augmented['image']
             mask = augmented['mask']
             mask = mask[0].permute(2, 0, 1)
+
+            target = augmented['target']
 
             return image, mask, target
 

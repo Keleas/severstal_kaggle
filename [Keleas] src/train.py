@@ -2,7 +2,6 @@ import os
 import gc
 import time
 import argparse
-import itertools
 import numpy as np
 from tqdm import tqdm
 
@@ -16,10 +15,8 @@ from torch.utils.data.sampler import RandomSampler
 from sklearn.model_selection import train_test_split
 
 from src.logger import Logger
-from src.utils import do_kaggle_metric
 from src.create_data import getDatabase
-from src.torchutils import EarlyStopping, AdamW, CyclicLRWithRestarts
-from src.losses import lovasz_softmax, jaccard_loss, dice_loss, dice_channel_torch
+from src.losses import lovasz_softmax, dice_channel_torch
 
 
 class TrainModel(object):
@@ -40,27 +37,27 @@ class TrainModel(object):
     def val_step(self):
         """ Validation step """
         cum_loss = 0
-        cum_dice = 0
+        predicts = []
+        truths = []
 
         self.model.eval()
         for inputs, masks, target in tqdm(self.val_loader, total=len(self.val_loader), ascii=True, desc='validation'):
             inputs, masks, target = inputs.to(device), masks.to(device), target.to(device)
             with torch.set_grad_enabled(False):
                 out = self.model(inputs)
-                loss = nn.BCEWithLogitsLoss()(out, masks)
-                # loss1 = jaccard_loss(masks, out)
-                # loss = lovasz_softmax(F.softmax(out, dim=1).squeeze(1), target.squeeze(1))  # tune
-                # loss = loss1 + loss2
+                loss1 = nn.BCEWithLogitsLoss()(out, masks)
+                loss2 = lovasz_softmax(F.softmax(out, dim=1), target)  # tune
+                loss = loss1 + loss2
 
-            predicts = F.sigmoid(out).detach().cpu().numpy()
-            truths = masks.detach().cpu().numpy()
-
+            predicts.append(F.sigmoid(out).detach().cpu().numpy())
+            truths.append(masks.detach().cpu().numpy())
             cum_loss += loss.item() * inputs.size(0)
-            cum_dice += dice_channel_torch(predicts, truths, 0.5)
             gc.collect()
 
         start = time.time()
-        mean_dice = cum_dice / len(self.val_loader)
+        predicts = np.concatenate(predicts).squeeze()
+        truths = np.concatenate(truths).squeeze()
+        mean_dice = dice_channel_torch(predicts, truths, 0.5)
         val_loss = cum_loss / self.val_data.__len__()
         print(f"Val calculated: {(time.time() - start):.3f}s")
         gc.collect()
@@ -76,10 +73,9 @@ class TrainModel(object):
 
             with torch.set_grad_enabled(True):
                 out = self.model(inputs)
-                loss = nn.BCEWithLogitsLoss()(out, masks)
-                # loss1 = jaccard_loss(masks, out)
-                # loss2 = lovasz_softmax(F.softmax(out, dim=1).squeeze(1), target.squeeze(1))  # tune
-                # loss = loss1 + loss2
+                loss1 = nn.BCEWithLogitsLoss()(out, masks)
+                loss2 = lovasz_softmax(F.softmax(out, dim=1), target)  # tune
+                loss = loss1 + loss2
 
                 loss.backward()
                 self.optimizer.step()
@@ -95,7 +91,7 @@ class TrainModel(object):
         """ Log information """
         print(f"[Epoch {cur_epoch}] training loss: {losses_train[-1]:.6f} | val_loss: {losses_val[-1]:.6f} | "
               f"val_dice: {dice:.6f}")
-        print(f"Learning rate: {self.lr_scheduler.get_lr()[0]:.6f}")
+        # print(f"Learning rate: {self.lr_scheduler.get_lr()[0]:.6f}")
 
         # 1. Log scalar values (scalar summary)
         info = {'loss': losses_train[-1],
@@ -111,19 +107,6 @@ class TrainModel(object):
             self.logger.histo_summary(tag, value.data.cpu().numpy(), cur_epoch + 1)
             self.logger.histo_summary(tag + '/grad', value.grad.data.cpu().numpy(), cur_epoch + 1)
 
-        # 3. Log training images (image summary)
-        # self.model.eval()
-        # inputs, labels = next(iter(self.val_loader))
-        # inputs, labels = inputs.to(device), labels.to(device)
-        # with torch.set_grad_enabled(False):
-        #     out = self.model(inputs)
-        #
-        # _, y_pred = torch.max(out, 1)
-        # info = {'images': (inputs.view(-1, 256, 1600)[:10].cpu().numpy(), y_pred.data.tolist(), labels.data.tolist())}
-        #
-        # for tag, images in info.items():
-        #     self.logger.image_summary(tag, images, cur_epoch + 1)
-
         return True
 
     def main(self):
@@ -132,6 +115,7 @@ class TrainModel(object):
         self.model = smp.Unet(args.model, classes=4, encoder_weights='imagenet')
         self.model = torch.nn.Sequential(*(list(self.model.children())[:-1]))
         self.model.to(device)
+        self.model.state_dict(torch.load('output/weights/resnet34_f0_s3.pth'))
         scheduler_step = args.epoch // args.snapshot
 
         num_train = len(os.listdir('input/severstal-steel-defect-detection/train_images'))
@@ -146,7 +130,7 @@ class TrainModel(object):
                 train_idx.append(t)
                 valid_idx.append(v)
         elif args.num_fold == 1:
-            train_idx, valid_idx, _, _ = train_test_split(indices, indices, test_size=0.3, random_state=42)
+            train_idx, valid_idx, _, _ = train_test_split(indices, indices, test_size=0.2, random_state=42)
             train_idx, valid_idx = [train_idx], [valid_idx]
         else:
             raise Exception('Invalid number of args.num_fold')
@@ -173,9 +157,11 @@ class TrainModel(object):
             # Setup optimizer
             self.optimizer = torch.optim.SGD(self.model.parameters(), lr=args.max_lr, momentum=args.momentum,
                                              weight_decay=args.weight_decay)
-            self.lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer,
-                                                                           scheduler_step, args.min_lr)
-            # early_stopping = EarlyStopping(patience=args.patience, verbose=True)
+            # self.lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer,
+            #                                                                scheduler_step, args.min_lr)
+            self.lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, patience=6,
+                                                                           verbose=True,
+                                                                           )
 
             # Service variables
             losses_train = []  # save training losses
@@ -185,7 +171,8 @@ class TrainModel(object):
                 train_loss = self.train_step()
                 # train_loss = 1
                 val_loss, accuracy = self.val_step()
-                self.lr_scheduler.step()
+                # self.lr_scheduler.step()  # for CosineAnnealingLR
+                self.lr_scheduler.step(val_loss)  # for ReduceLROnPlateau
 
                 losses_train.append(train_loss)
                 losses_val.append(val_loss)
@@ -196,6 +183,8 @@ class TrainModel(object):
                 if accuracy >= best_acc:
                     best_acc = accuracy
                     best_param = self.model.state_dict()
+                    torch.save(best_param, args.save_weight + args.weight_name +
+                               '_lrPlateau' + '.pth')
 
                 if (epoch + 1) % scheduler_step == 0:
                     torch.save(best_param, args.save_weight + args.weight_name +
@@ -211,22 +200,21 @@ class TrainModel(object):
                     num_snapshot += 1
                     best_acc = 0
 
-
         return True
 
 
 parser = argparse.ArgumentParser(description='')
 parser.add_argument('--model', default='resnet34', type=str, help='Model version')
-parser.add_argument('--batch_size', default=4, type=int, help='Batch size for training')
+parser.add_argument('--batch_size', default=8, type=int, help='Batch size for training')
 parser.add_argument('--epoch', default=40, type=int, help='Number of training epochs')
 parser.add_argument('--num_fold', default=1, type=int, help='Number of folds')
-parser.add_argument('--snapshot', default=4, type=int, help='Number of snapshots per fold')
+parser.add_argument('--snapshot', default=1, type=int, help='Number of snapshots per fold')
 parser.add_argument('--cuda', default=True, type=bool, help='Use cuda to train model')
 parser.add_argument('--save_weight', default='output/weights/', type=str, help='weight save space')
 parser.add_argument('--max_lr', default=0.01, type=float, help='max learning rate')
-parser.add_argument('--min_lr', default=1e-4, type=float, help='min learning rate')
+parser.add_argument('--min_lr', default=1e-3, type=float, help='min learning rate')
 parser.add_argument('--momentum', default=0.9, type=float, help='momentum for SGD')
-parser.add_argument('--weight_decay', default=1e-4, type=float, help='Weight decay for SGD')
+parser.add_argument('--weight_decay', default=1e-5, type=float, help='Weight decay for SGD')
 parser.add_argument('--patience', default=40, type=int, help='Number of epoch waiting for best score')
 
 args = parser.parse_args()
