@@ -1,20 +1,8 @@
 import os
-import gc
-import cv2
-import time
-import math
-import random
-import numpy as np
 import pandas as pd
-from tqdm import tqdm
-from copy import deepcopy
-import matplotlib.pyplot as plt
-
-import torch
 from torch.utils.data import Dataset
 from torch.utils.data import DataLoader
 from torch.utils.data.sampler import RandomSampler
-from sklearn.model_selection import train_test_split
 from albumentations import (
     MotionBlur,
     HorizontalFlip,
@@ -24,20 +12,16 @@ from albumentations import (
     Compose,
     IAAAdditiveGaussianNoise,
     GaussNoise,
-    ElasticTransform,
-    GridDistortion,
-    OpticalDistortion,
-    RandomSizedCrop,
     OneOf,
-    CLAHE,
+    Normalize,
     RandomBrightnessContrast,
-    RandomGamma,
-    Normalize
+    ShiftScaleRotate,
+    RandomSizedCrop,
 )
 from albumentations.pytorch.transforms import ToTensor
 from sklearn.model_selection import KFold
 
-from src.utils import rle_decode, rle_encode
+from src.utils import rle_encode
 from src.transform import *
 
 import warnings
@@ -72,18 +56,21 @@ class SteelDatabase(Dataset):
             std = (0.229, 0.224, 0.225)
             train_aug = Compose([
                 OneOf([
-                    VerticalFlip(),
-                    HorizontalFlip(),
-                ], p=0.5),
+                    ShiftScaleRotate(),
+                    VerticalFlip(p=0.8),
+                    HorizontalFlip(p=0.8),
+                ], p=0.6),
                 OneOf([
-                    MotionBlur(p=0.2),
-                    MedianBlur(blur_limit=3, p=0.1),
-                    Blur(blur_limit=3, p=0.1),
-                ], p=0.2),
+                    RandomBrightnessContrast(),
+                    MotionBlur(p=0.5),
+                    MedianBlur(blur_limit=3, p=0.5),
+                    Blur(blur_limit=3, p=0.5),
+                ], p=0.6),
                 OneOf([
                     IAAAdditiveGaussianNoise(),
                     GaussNoise(),
-                ], p=0.2),
+                ], p=0.6),
+                RandomSizedCrop(min_max_height=(250, 256), height=256, width=400, p=1),
                 Normalize(mean=mean, std=std, p=1),
                 ToTensor()])
 
@@ -166,9 +153,6 @@ if __name__ == '__main__':
         train_idx.append(t)
         valid_idx.append(v)
 
-    print(train_idx[0])
-    print(valid_idx[0])
-
     for fold in range(num_fold):
         train_data = getDatabase(mode='train', image_idx=train_idx[fold])
         train_loader = DataLoader(train_data,
@@ -177,32 +161,15 @@ if __name__ == '__main__':
                                   num_workers=4,
                                   pin_memory=True)
 
-        val_data = getDatabase(mode='val', image_idx=valid_idx[fold])
-        val_loader = DataLoader(val_data,
-                                shuffle=False,
-                                batch_size=30,
-                                num_workers=4,
-                                pin_memory=True)
-
-        test_data = getDatabase(mode='test', image_idx=None)
-        test_loader = DataLoader(test_data,
-                                 shuffle=False,
-                                 batch_size=30,
-                                 num_workers=4,
-                                 pin_memory=True)
-
-    import torch.nn.functional as F
     image, mask, target = next(iter(train_loader))
-    out_f = F.softmax(mask, dim=1)
-    from src.losses import lovasz_softmax
-    from src.utils import do_kaggle_metric
-    loss = lovasz_softmax(out_f.squeeze(1), target.squeeze(1))
-    precision, _, _ = do_kaggle_metric(mask.cpu().numpy(), mask.cpu().numpy(), 0.5)
-    precision = precision.mean()
-    print(f'lovasz: {loss}, kaggle_metric: {precision}')
-    print(out_f.cpu().numpy().shape, mask.cpu().numpy().shape)
 
-    print(F.sigmoid(mask).cpu().numpy().shape, F.softmax(mask, dim=1).cpu().numpy().shape)
+    import matplotlib.pyplot as plt
+    for i in range(30):
+        img = np.moveaxis(mask[i][0].numpy(), 0, -1)
+        plt.imshow(img.astype('uint8'))
+        plt.show()
+
+
 
 
 
