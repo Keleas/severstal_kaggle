@@ -5,10 +5,12 @@ Code for Kaggle competition kaggle.com/c/severstal-steel-defect-detection
 ## Score
 
 Chosen submission:
+
 | Public LB | Private LB |
 | 0.91175   | 0.90075    |
 
 Best submission:
+
 | Public LB | Private LB |
 | 0.91089   | 0.90290    |
 
@@ -38,4 +40,4 @@ Pixel Thresholds: 0.4, 0.4, 0.4, 0.4
 
 ![model](img/model.png)
 
-You can check this Link for more detail and code, thank to HengCherKeng!
+You can check this [Link](https://www.kaggle.com/c/severstal-steel-defect-detection/discussion/111457#latest-654845) for more detail and code, thank to HengCherKeng!
