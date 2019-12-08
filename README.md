@@ -34,11 +34,11 @@ Best submission (__51th place__):
 - __Sampler__: Weighted Sampler
 
 - __Ensemble Model__: simply average 5 model output probability to achieve the final mask probability without TTA
-  1. Unet + efficientnet-b4, training with heavy image augmentation
-  2. Unet + efficientnet-b4 + SCSE layer
-  3. Unet + efficientnet-b4 + Mish layer
-  4. Unet + efficientnet-b3
-  5. Unet + se-resnext50
+  - Unet + efficientnet-b4, training with heavy image augmentation
+  - Unet + efficientnet-b4 + SCSE layer
+  - Unet + efficientnet-b4 + Mish layer
+  - Unet + efficientnet-b3
+  - Unet + se-resnext50
 
 __Threshold__
 Label Thresholds: 0.7, 0.7, 0.6, 0.6
