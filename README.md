@@ -1,6 +1,6 @@
 # Severstal-Steel-Defect-Detection-Kaggle (108th place solutions)
 
-Code for Kaggle competition kaggle.com/c/severstal-steel-defect-detection
+Code for [Kaggle competition](https://www.kaggle.com/c/severstal-steel-defect-detection)
 
 ## Score
 
