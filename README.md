@@ -7,11 +7,13 @@ Code for Kaggle competition kaggle.com/c/severstal-steel-defect-detection
 Chosen submission:
 
 | Public LB | Private LB |
+| --- | --- |
 | 0.91175   | 0.90075    |
 
 Best submission:
 
 | Public LB | Private LB |
+| --- | --- |
 | 0.91089   | 0.90290    |
 
 ## Summary
