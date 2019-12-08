@@ -17,17 +17,17 @@ Best submission (__51th place__):
 | 0.91089   | 0.90290    |
 
 ## Summary
-- __Basic Model__:​ Unet
+- __Basic Model__: Unet
 
-- __Encoder__:​ efficientnet-b3, efficientnet-b4, se-resnext50
+- __Encoder__: efficientnet-b3, efficientnet-b4, se-resnext50
 
-- __Loss__:​ Focal Loss
+- __Loss__: Focal Loss
 
-- __Optimizer__:​ Adam, init lr = 0.0005
+- __Optimizer__: Adam, init lr = 0.0005
 
-- __Learning Rate Scheduler__:​ ReduceLROnPlateau (factor=0.5, patience=3,cooldown=3, min_lr=1e-8)
+- __Learning Rate Scheduler__: ReduceLROnPlateau (factor=0.5, patience=3,cooldown=3, min_lr=1e-8)
 
-- __Image Size__:​ 256x800 for training, 256x1600 for inference
+- __Image Size__: 256x800 for training, 256x1600 for inference
 
 - __Image Augmentation__: horizontal flip, vertical flip, blur
 
@@ -40,9 +40,9 @@ Best submission (__51th place__):
   - Unet + efficientnet-b3
   - Unet + se-resnext50
 
-__Threshold__
-Label Thresholds: 0.7, 0.7, 0.6, 0.6
-Pixel Thresholds: 0.4, 0.4, 0.4, 0.4
+- __Threshold__:
+  - Label Thresholds: 0.7, 0.7, 0.6, 0.6
+  - Pixel Thresholds: 0.4, 0.4, 0.4, 0.4
 
 ## Model Pipeline
 
